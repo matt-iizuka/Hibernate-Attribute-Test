@@ -2,18 +2,21 @@ package test;
 
 import static org.junit.Assert.assertEquals;
 
+import java.util.List;
+
 import javax.persistence.EntityManager;
 import javax.persistence.EntityManagerFactory;
+import javax.persistence.EntityTransaction;
 import javax.persistence.Persistence;
+import javax.persistence.Tuple;
 import javax.persistence.criteria.CriteriaBuilder;
 import javax.persistence.criteria.CriteriaQuery;
+import javax.persistence.criteria.Join;
 import javax.persistence.criteria.JoinType;
 import javax.persistence.criteria.Path;
 import javax.persistence.criteria.Root;
-import javax.persistence.metamodel.Metamodel;
-import javax.persistence.metamodel.PluralAttribute;
+import javax.persistence.metamodel.SingularAttribute;
 
-import org.hibernate.jpa.criteria.path.PluralAttributePath;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -22,14 +25,41 @@ public class EntityTest
 {
 	private EntityManager entityManager;
 	
-	private Metamodel metamodel;
+	private EntityTransaction entityTransaction;
+	
+	private CriteriaBuilder builder;
+	
+	private CriteriaQuery<Tuple> criteriaQuery;
+	
+	private Root<Entity> root;
+	
+	private Join<Entity, EmbeddedType> join;
 	
 	@Before
 	public void setup()
 	{
 		entityManager = Persistence.createEntityManagerFactory("unit1").createEntityManager();
+		entityTransaction = entityManager.getTransaction();
+		entityTransaction.begin();
 		
-		metamodel = entityManager.getMetamodel();
+		ManyToOneType manyToOneType = new ManyToOneType();
+		manyToOneType.setValue("thevalue");
+		
+		EmbeddedType embeddedType = new EmbeddedType();
+		embeddedType.setManyToOneType(manyToOneType);
+		
+		Entity entity = new Entity();
+		entity.setEmbeddedType(embeddedType);
+		
+		entityManager.persist(entity);
+		entityManager.flush();
+		
+		builder = entityManager.getCriteriaBuilder();
+		
+		criteriaQuery = builder.createTupleQuery();
+		root = criteriaQuery.from(Entity.class);
+		
+		join = root.join("embeddedType", JoinType.LEFT);
 	}
 	
 	@After
@@ -38,53 +68,47 @@ public class EntityTest
 		if (entityManager != null)
 		{
 			EntityManagerFactory entityManagerFactory = entityManager.getEntityManagerFactory();
+			entityTransaction.rollback();
 			entityManager.close();
 			entityManagerFactory.close();
 			
 			entityManagerFactory = null;
-			metamodel = null;
 		}
 	}
 	
-	/**
-	 * Tests that the children element collection is a plural attribute and contains Entity elements. It uses
-	 * the metamodel to get this information.
-	 * 
-	 */
 	@Test
-	public void getChildrenElementFromMetamodel()
+	public void getResultWithStringPropertyDerivedPath()
 	{
-		PluralAttribute<?, ?, ?> pluralAttribute =
-			(PluralAttribute<?, ?, ?>) metamodel.entity(Entity.class).getAttribute("children");
+		// left join to the manyToOne on the embeddable with a string property
+		Path<?> path = join.join("manyToOneType", JoinType.LEFT).get("value");
+
+		// select the path in the tuple
+		criteriaQuery.select(builder.tuple(path));
 		
-		assertEquals(Entity.class, pluralAttribute.getElementType()
-			.getJavaType());
+		assertEquals("thevalue", getResult());
 	}
 	
-	/**
-	 * Tests that the children element collection is a plural attribute and contains Entity elements. This information
-	 * should be able to be derived from the model behind the path. The test throws a null pointer as the model returned
-	 * from this method is null.
-	 * 
-	 * @see PluralAttributePath
-	 * 
-	 */
 	@Test
-	public void getChildrenElementFromQueryRoot()
+	public void getResultWithMetamodelDerivedPath()
 	{
-		CriteriaBuilder builder = entityManager.getCriteriaBuilder();
-		CriteriaQuery<?> criteriaQuery = builder.createQuery();
-		Root<Entity> root = criteriaQuery.from(Entity.class);
+		// get the attribute from the embedded type metamodel
+		SingularAttribute<EmbeddedType, ?> attr =
+			entityManager.getMetamodel().managedType(EmbeddedType.class)
+				.getDeclaredSingularAttribute("manyToOneType");
 		
-		Path<?> pluralAttributePath = root.join("children", JoinType.LEFT);
+		// join using the metamodel attribute instance
+		Path<?> path = join.join(attr, JoinType.LEFT).get("value");
 		
-		// this returns null, but it should return the correct plural attribute as in the above test
-		PluralAttribute<?, ?, ?> pluralAttribute = (PluralAttribute<?, ?, ?>) pluralAttributePath.getModel();
+		// select the value property
+		criteriaQuery.select(builder.tuple(path));
 		
-		// getModel is implemented here by org.hibernate.jpa.criteria.path.PluralAttributePath.getModel, which always
-		// returns null
+		assertEquals("thevalue", getResult());
+	}
+	
+	private String getResult()
+	{
+		List<Tuple> results = entityManager.createQuery(criteriaQuery).getResultList();
 		
-		// throws a null pointer exception as the plural attribute is null
-		assertEquals(Entity.class, pluralAttribute.getElementType().getJavaType());
+		return (String) results.iterator().next().get(0);
 	}
 }

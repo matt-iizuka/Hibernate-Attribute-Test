@@ -1,31 +1,31 @@
 package test;
 
-import java.util.Set;
-
+import javax.persistence.Embedded;
+import javax.persistence.GeneratedValue;
 import javax.persistence.Id;
-import javax.persistence.OneToMany;
 
 @javax.persistence.Entity
 public class Entity
 {
 	@Id
-	public Long id;
+	@GeneratedValue
+	private Long id;
 
-	@OneToMany
-	private Set<Entity> children;
+	@Embedded
+	private EmbeddedType embeddedType;
 	
 	public Entity()
 	{
 		// for jpa
 	}
-	
-	public Set<Entity> getChildren()
+
+	public EmbeddedType getEmbeddedType()
 	{
-		return children;
+		return embeddedType;
 	}
 	
-	public Long getId()
+	public void setEmbeddedType(EmbeddedType embeddedType)
 	{
-		return id;
+		this.embeddedType = embeddedType;
 	}
 }
